@@ -134,3 +134,14 @@ create trigger leads_set_updated_at before update on leads
 -- implications, gaps, next action, quote context) alongside the flat brief
 -- columns. Idempotent — safe to re-run `npm run db:schema`.
 alter table ai_deal_briefs add column if not exists intelligence jsonb not null default '{}'::jsonb;
+
+-- Ready to Contract persists its complete workspace as one document. Every
+-- mutation locks this singleton row in a transaction before replacing state,
+-- preventing concurrent Vercel invocations from losing each other's updates.
+create table if not exists contract_workspace_state (
+  id text primary key,
+  state jsonb not null,
+  version bigint not null default 1,
+  updated_at timestamptz not null default now(),
+  constraint contract_workspace_singleton check (id = 'default')
+);

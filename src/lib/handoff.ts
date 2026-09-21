@@ -1,6 +1,5 @@
 import { computeReadiness } from "@/lib/readiness";
 import type { OpportunityIntelligence } from "@/lib/ai/intelligence";
-import { DOWNSTREAM } from "@/lib/modules";
 import { getWorkspaceData } from "@/lib/repo/workspace";
 import type { Activity, AiDealBrief, Company, Lead } from "@/lib/types";
 
@@ -9,10 +8,9 @@ import type { Activity, AiDealBrief, Company, Lead } from "@/lib/types";
  * Lead & Deal Workspace (this app) and the downstream Quote → Contract →
  * E-signature → Renewal workspace.
  *
- * Two delivery paths, so neither side blocks the other:
- *   push  – POST the payload to QUOTE_HANDOFF_ENDPOINT on the contract module.
- *   pull  – the contract module GETs /api/handoff/{leadId} from this app.
- * Both return the same QuoteHandoffPayload (see docs/QUOTE_HANDOFF.md).
+ * Delivery is in-process: Continue to Contract writes the payload into the
+ * native Ready to Contract store (`enqueueQuoteHandoff`). GET /api/handoff/{leadId}
+ * remains for the same payload if something needs to pull it.
  */
 
 export const HANDOFF_SCHEMA_VERSION = "2.0";
@@ -164,94 +162,4 @@ export async function buildHandoffPayload(
 
 function intelligenceOf(b: AiDealBrief | null): OpportunityIntelligence | null {
   return b && b.intelligence && "quote_context" in b.intelligence ? (b.intelligence as OpportunityIntelligence) : null;
-}
-
-/* ------------------------------------------------------------------ */
-/* Where the contract module lives and how we reach it                 */
-/* ------------------------------------------------------------------ */
-
-export interface QuoteWorkspaceConfig {
-  /** Base URL of the contract module, e.g. http://127.0.0.1:8001 */
-  baseUrl: string | null;
-  /** POST target for the push path. Defaults to {baseUrl}/api/handoffs */
-  endpoint: string | null;
-  /**
-   * Where to send the user afterwards. Supports {accountKey}, {leadId}.
-   * Defaults to {baseUrl}/?lead_id={leadId}&customer_id={accountKey} — the Quote Ready
-   * module (modules/guided-selling) opens that handoff, or its Customer 360 once accepted.
-   */
-  accountUrlTemplate: string | null;
-  /** Optional shared secret sent as X-Sales-Engine-Key on the push. */
-  apiKey: string | null;
-}
-
-export function getQuoteWorkspaceConfig(): QuoteWorkspaceConfig {
-  const baseUrl = trimSlash(process.env.QUOTE_WORKSPACE_URL) ?? null;
-  return {
-    baseUrl,
-    endpoint: process.env.QUOTE_HANDOFF_ENDPOINT || (baseUrl ? `${baseUrl}/api/handoffs` : null),
-    accountUrlTemplate:
-      process.env.QUOTE_ACCOUNT_URL_TEMPLATE ||
-      (baseUrl ? `${baseUrl}/?lead_id={leadId}&customer_id={accountKey}` : null),
-    apiKey: process.env.HANDOFF_API_KEY || null,
-  };
-}
-
-export function quoteWorkspaceUrlFor(accountKey: string, leadId: string): string | null {
-  const { accountUrlTemplate } = getQuoteWorkspaceConfig();
-  if (!accountUrlTemplate) return null;
-  return accountUrlTemplate
-    .replace("{accountKey}", encodeURIComponent(accountKey))
-    .replace("{leadId}", encodeURIComponent(leadId));
-}
-
-export interface DeliveryResult {
-  status: "delivered" | "pending" | "not_configured";
-  /** Where to send the user. */
-  url: string | null;
-  detail: string;
-}
-
-/**
- * Push the payload to the contract module. Never throws: an unreachable or
- * not-yet-implemented endpoint downgrades to "pending" (the quote side can
- * pull from /api/handoff/{leadId}) and we still navigate the user across.
- */
-export async function deliverHandoff(payload: QuoteHandoffPayload): Promise<DeliveryResult> {
-  const cfg = getQuoteWorkspaceConfig();
-  const fallbackUrl = quoteWorkspaceUrlFor(payload.customer.key, payload.opportunity.id);
-
-  if (!cfg.endpoint) {
-    return { status: "not_configured", url: fallbackUrl, detail: "QUOTE_WORKSPACE_URL is not set." };
-  }
-
-  try {
-    const res = await fetch(cfg.endpoint, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        ...(cfg.apiKey ? { "x-sales-engine-key": cfg.apiKey } : {}),
-      },
-      body: JSON.stringify(payload),
-      signal: AbortSignal.timeout(6000),
-      cache: "no-store",
-    });
-    if (!res.ok) {
-      return { status: "pending", url: fallbackUrl, detail: `${DOWNSTREAM.partner} responded ${res.status}.` };
-    }
-    // The quote side may tell us exactly where the account now lives.
-    const body = (await res.json().catch(() => ({}))) as { account_url?: string; redirect_url?: string };
-    const url = body.account_url || body.redirect_url || fallbackUrl;
-    return { status: "delivered", url, detail: `Quote context delivered to ${DOWNSTREAM.partner}.` };
-  } catch (err) {
-    return {
-      status: "pending",
-      url: fallbackUrl,
-      detail: `${DOWNSTREAM.partner} not reachable (${err instanceof Error ? err.message : "error"}); it will pull the context on open.`,
-    };
-  }
-}
-
-function trimSlash(v: string | undefined) {
-  return v ? v.replace(/\/+$/, "") : undefined;
 }

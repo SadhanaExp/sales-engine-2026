@@ -4,8 +4,8 @@ import { canAccessContract } from "@/lib/roles";
 
 /**
  * Server-side authorisation for the one gate in this product: the contract
- * boundary (Ready to Contract, the quote context review, the handoff, and the
- * contract module behind the proxy).
+ * boundary (Ready to Contract, the quote context review, the handoff, and
+ * `/api/contract`).
  *
  * Every entry point calls one of these — pages `requireContractAccess`, server
  * actions and route handlers `assertContractAccess` — so hiding a control in

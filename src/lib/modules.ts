@@ -5,10 +5,8 @@
  *
  * The stage after Qualification is called **Ready to Contract** everywhere a
  * person can read it: sidebar, pipeline column, stage badges, buttons,
- * headings, handoff copy and AI output. The underlying module is unchanged —
- * its folder (modules/guided-selling), its route (/guided-selling), its API
- * endpoints and the `quoted` lead status stay as they are, because those are
- * data and integration names, not labels.
+ * headings, handoff copy and AI output. The route stays `/guided-selling` and
+ * the lead status stays `quoted` — those are integration names, not labels.
  *
  * Each label is written out rather than templated off the stage name: "Continue
  * to Ready to Contract" is what templating produces, and it reads badly. Change

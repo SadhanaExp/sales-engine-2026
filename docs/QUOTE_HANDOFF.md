@@ -1,31 +1,30 @@
-# Guided Selling handoff — integration contract
+# Ready to Contract handoff — integration contract
 
-This is the boundary between the two halves of the Experience.com Sales Engine:
+This is the boundary inside the Experience.com Sales Engine:
 
 ```
-Lead & Deal Workspace (Next.js, :3000)                                   Guided Selling module (FastAPI, :8001)
-Customer Inquiry → Opportunity → Qualification → AI Opportunity Intelligence → Quote Context → [Continue to Guided Selling →] → Quote → Approval → Contract → E-signature → Renewal
+Lead & Deal Workspace → Quote Context → Ready to Contract
+Customer Inquiry → Opportunity → Qualification → AI Opportunity Intelligence → Continue to Contract → Quote → Approval → Contract → E-signature → Renewal
 ```
 
-When a rep clicks **Continue to Guided Selling →** on a qualified opportunity, the Lead & Deal Workspace:
+When a rep clicks **Continue to Contract →** on a qualified opportunity, the workspace:
 
 1. Assembles the quote context (payload below) — the same opportunity, customer, contacts, qualification, requirements and AI insights.
-2. `POST`s it to the Guided Selling module (**push**).
-3. Moves the opportunity to the **Guided Selling** stage and records a timestamped handoff activity.
-4. Opens the Guided Selling page with the module embedded on that opportunity.
+2. Writes it into the native Ready to Contract store (`enqueueQuoteHandoff` / `POST /api/contract/handoffs`).
+3. Moves the opportunity to the **Quoted** stage and records a timestamped handoff activity.
+4. Opens `/guided-selling?lead={leadId}`.
 
-If the POST isn't available yet, steps 3–4 still happen; the module can **pull** the identical payload with `GET /api/handoff/{lead_id}`.
+The same payload is still available as `GET /api/handoff/{lead_id}` for a pull.
 
 ## One customer, never duplicated
 
 `customer.key` is stable on both sides: the company's email domain (`acme.com`), or a slug of the name when the domain is a free-mail provider. **Upsert on `customer.key`.** A second inquiry from the same company arrives with the same key and a new `opportunity` — it must attach to the existing account, exactly as renewals do on your side.
 
-## Push — what we send you
+## Push — what Continue to Contract writes
 
 ```
-POST {QUOTE_WORKSPACE_URL}/api/handoffs
+POST /api/contract/handoffs
 Content-Type: application/json
-X-Sales-Engine-Key: <shared HANDOFF_API_KEY>
 ```
 
 ```json
@@ -78,29 +77,22 @@ X-Sales-Engine-Key: <shared HANDOFF_API_KEY>
 
 **Respond** `200`/`201` with, optionally, where the account now lives — we'll send the user straight there:
 
-```json
-{ "account_url": "http://127.0.0.1:8001/accounts/acme.com" }
-```
-
-Any non-2xx (or no endpoint yet) is fine: we record the handoff as *pending* and open the default URL below, and you pull the payload on load.
+The Continue to Contract action then opens `/guided-selling?lead={leadId}`.
 
 ## Pull — fetching it yourself
 
 ```
-GET {LEAD_WORKSPACE_URL}/api/handoff/{lead_id}
+GET /api/handoff/{lead_id}
 X-Sales-Engine-Key: <shared HANDOFF_API_KEY>
 ```
 
-Returns the same JSON. The `lead_id` arrives on your URL (`?lead_id=…`). Also works from the browser for a signed-in Sales Engine user (cookie), with CORS allowed for `QUOTE_WORKSPACE_URL`.
+Returns the same JSON. Also works from the browser for a signed-in Admin (cookie).
 
 ## Where we send the user
 
-Default: `{QUOTE_WORKSPACE_URL}/?lead_id={leadId}&customer_id={accountKey}`
-(Override with `QUOTE_ACCOUNT_URL_TEMPLATE` in the Lead & Deal `.env.local`.)
+`/guided-selling?lead={leadId}`
 
-The Guided Selling module (`modules/guided-selling`) reads those query parameters on load: a queued
-handoff opens the **Lead handoff** inbox, an accepted one opens its **Customer 360**. The
-Guided Selling page embeds the module with `&embed=1` (module shell without its own sidebar).
+Ready to Contract reads that query on load: a queued handoff opens the **Lead handoff** inbox; an accepted one opens **Customer 360**.
 
 ## What the account page should show (the "continuity" moment)
 
@@ -110,27 +102,26 @@ So a judge lands and immediately thinks *"this is the same Acme I just qualified
   **Originated from a qualified lead · Lead & Deal Workspace · Sep 18, 2026 · 3:42 PM** — linking to `opportunity.url`.
 - Contacts and `sizing.users` / `sizing.locations` pre-populated; `need.primary_need` as the product line; `need.requirements` on the quote draft.
 - An Activity entry: *"Qualified deal handed off from Lead & Deal Workspace"* with `handoff.requested_at` (replaces the hard-coded "from Total Expert" demo line).
-- `qualification.*` is what sales established (`null` = not confirmed); `qualification.missing` lists what Guided Selling still needs to ask.
+- `qualification.*` is what sales established (`null` = not confirmed); `qualification.missing` lists what Ready to Contract still needs to ask.
 - `need.summary` is a one-sentence narrative if you show one; `insights` are the commercial implications of the requirements (locations × users, integrations, replacement, timeline) — the only AI-derived content in the payload. Nothing in it is inferred pricing or product.
 
 ## The receiver (implemented)
 
-`modules/guided-selling/app/inbound.py` maps this payload onto the Guided Selling module's existing
-`HandoffLead`, and `POST /api/handoffs` (in `modules/guided-selling/app/main.py`) upserts it into the
-handoff inbox by id (`se-{opportunity.id}`), so a re-send never creates a second entry.
+`src/lib/contract/store.ts` maps this payload onto `HandoffLead`, and
+`enqueueQuoteHandoff` upserts it into the inbox by id (`se-{opportunity.id}`), so a re-send never creates a second entry.
 
 | Payload | HandoffLead |
 |---|---|
 | `opportunity.id` | `id` = `se-{id}` |
 | `customer.key` | `customer_id` — Customer 360 is keyed on it; re-accepting refreshes the same account |
 | `customer.name` | `company` |
-| — | `source_crm` = `Experience.com` (native intake); the module applies its own default agreement and catalog fallback |
+| — | `source_crm` = `Experience.com` (native intake); Ready to Contract applies its own default agreement and catalog fallback |
 | `need.summary` (+ users / locations / first insight when not already in the summary) | `why_qualified` |
-| `qualification.budget` | `budget_context` (context only — never the quote price); `quote_amount` is always `To be quoted` until Guided Selling prices it |
+| `qualification.budget` | `budget_context` (context only — never the quote price); `quote_amount` is always `To be quoted` until Ready to Contract prices it |
 | `qualification.missing` | `gaps` |
 | `contacts[]` (`title`→`role`; signer = the contact matching `qualification.decision_maker`) | `contacts` |
 
-Everything from **Accept handoff** onward is the module's own flow, unchanged.
+Everything from **Accept handoff** onward is the native Ready to Contract flow.
 
 ## Shared visual language
 

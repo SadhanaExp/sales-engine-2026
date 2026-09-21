@@ -4,23 +4,21 @@ The front half of the Experience.com Sales Engine, as a working application:
 
 **Customer Inquiry → Opportunity → Qualification → AI Opportunity Intelligence → Quote Context → Ready to Contract**
 
-One origin locally: **http://localhost:3000**. `npm run dev` starts the Next.js workspace and the contract module together; the module is proxied through this app, so you never open `:8001` in a second window.
+One origin locally: **http://localhost:3000**. Ready to Contract is native Next.js (`/guided-selling`, `/api/contract`).
 
 Two experiences in one app:
 
 - **Talk to Sales** at `/inquire` — a prospect submits company, contact, users, interest and requirements; a lead is created instantly and they can book a discovery call.
 - **Internal workspace** at `/` (login required) — pipeline, Scheduled Tasks, per-lead workspace (Contacts, Activity, Qualification, AI Opportunity Intelligence), and **Ready to Contract** (Admin only): Quote Context → handoff into Quote → Approval → Contract → E-signature → Renewal.
 
-Stack: Next.js 16 (App Router) · React 19 · TypeScript · Tailwind CSS v4 · shadcn/ui-style components on Radix · PostgreSQL (Supabase-compatible). Python 3.11+ for the contract module.
+Stack: Next.js 16 (App Router) · React 19 · TypeScript · Tailwind CSS v4 · shadcn/ui-style components on Radix · PostgreSQL (Supabase-compatible).
 
 ## Run it locally
 
-**You need:** Node 20+, Python 3.11+, and PostgreSQL 14+ on port 5432 (Postgres.app, Homebrew, or a Docker container named `sales_engine_pg` all work). Or point `DATABASE_URL` at a Supabase project — nothing in the code is Supabase-specific.
+**You need:** Node 20+ and PostgreSQL 14+ on port 5432 (Postgres.app, Homebrew, or a Docker container named `sales_engine_pg` all work). Or point `DATABASE_URL` at a Supabase project — nothing in the code is Supabase-specific.
 
 ```bash
 npm install
-python3 -m venv modules/guided-selling/.venv
-modules/guided-selling/.venv/bin/pip install -r modules/guided-selling/requirements.txt
 
 createdb sales_engine                 # skip if the database already exists
 cp .env.example .env.local
@@ -43,7 +41,6 @@ Postgres URL (Neon or Supabase) — local Docker Postgres is not reachable.
 1. `DATABASE_URL='postgres://…hosted…' npm run db:setup`
 2. Import https://github.com/SadhanaExp/sales-engine-2026 at [vercel.com/new](https://vercel.com/new)
 3. Set `DATABASE_URL`, `SESSION_SECRET`, `NEXT_PUBLIC_STAGE_NAME=Ready to Contract`, `NEXT_PUBLIC_PARTNER_MODULE_NAME=Ready to Contract`
-4. Leave `QUOTE_WORKSPACE_URL` unset on Vercel (Ready to Contract needs the Python process; that is the Render/Docker path)
 
 Full steps: **[docs/DEPLOY.md](docs/DEPLOY.md)**.
 
@@ -74,7 +71,7 @@ Sign in:
 
 **Scheduled Tasks** (`/tasks`) is the work list (calls, gaps, next actions). The week calendar is **`/schedule`** — linked from the bottom of Scheduled Tasks, not a second sidebar item.
 
-Open only **http://localhost:3000**. If port 8001 is already in use, another copy of the module is running; stop it and rerun `npm run dev`.
+Open **http://localhost:3000**.
 
 ## Naming (Ready to Contract vs Guided Selling)
 
@@ -85,7 +82,7 @@ NEXT_PUBLIC_STAGE_NAME=Ready to Contract
 NEXT_PUBLIC_PARTNER_MODULE_NAME=Ready to Contract
 ```
 
-The **code and folder** stay `modules/guided-selling` and route `/guided-selling` — those are integration names, not labels. Copying `.env.example` without changing those two lines used to restore “Guided Selling” in the UI.
+The **route** stays `/guided-selling` — that is an integration name, not the label. Copying `.env.example` without changing those two lines used to restore “Guided Selling” in the UI.
 
 ## Roles and access
 
@@ -94,7 +91,7 @@ Two roles in `app_users.role`:
 | | Sales User | Admin |
 | --- | --- | --- |
 | Inquiries, pipeline, opportunity workspace, contacts, activity, qualification, AI Deal Brief, Scheduled Tasks | yes | yes |
-| Ready to Contract, quote context review, handoff, contract module | no | yes |
+| Ready to Contract, quote context review, handoff | no | yes |
 
 Enforced on the server (`canAccessContract` in `src/lib/roles.ts`, `src/lib/authz.ts`, `src/proxy.ts`) — typing the URL or curling the API gets the same answer as the hidden nav item.
 
@@ -138,17 +135,11 @@ Email + password (`app_users`, bcrypt) or **Sign in with Google** (`GOOGLE_CLIEN
 
 Industry is shown on each pipeline row and filterable from the sidebar.
 
-## Ready to Contract (contract module)
+## Ready to Contract
 
-Lives in **`modules/guided-selling`** (FastAPI + Vite/React). After the venv above, **`npm run dev` starts both**. `npm run dev:web` starts the workspace only.
+Native Next.js at **`/guided-selling`**, with state in Postgres (`contract_workspace_state`) and APIs at **`/api/contract/*`**.
 
-Rebuild the module UI only after changing `modules/guided-selling/frontend`:
-
-```bash
-(cd modules/guided-selling/frontend && npm install && npm run build)
-```
-
-**Continue to Contract** posts schema-2.0 quote context to `POST /api/handoffs` and opens Ready to Contract on the same customer. No quote amount, package or discount is sent — the module prices the deal. Handoff contract: **[docs/QUOTE_HANDOFF.md](docs/QUOTE_HANDOFF.md)**. Public deploy: **[docs/DEPLOY.md](docs/DEPLOY.md)**.
+**Continue to Contract** writes schema-2.0 quote context into that store and opens Ready to Contract on the same customer. No quote amount, package or discount is sent — Ready to Contract prices the deal. Handoff contract: **[docs/QUOTE_HANDOFF.md](docs/QUOTE_HANDOFF.md)**. Public deploy: **[docs/DEPLOY.md](docs/DEPLOY.md)**.
 
 ## Where things live
 
@@ -167,12 +158,13 @@ Rebuild the module UI only after changing `modules/guided-selling/frontend`:
 | Lead workspace | `src/app/(app)/leads/[id]/` |
 | Quote handoff | `src/app/(app)/leads/[id]/quote/page.tsx` |
 | Ready to Contract page | `src/app/(app)/guided-selling/page.tsx` |
+| Ready to Contract UI | `src/components/contract/` |
+| Ready to Contract store | `src/lib/contract/` |
 | AI workflow | `src/lib/ai/`; evals in `evals/ai-intelligence/` |
-| Contract module | `modules/guided-selling/` |
 
 ## If something doesn't start
 
-- `address already in use` on 8001 — another module copy is running; stop it and rerun.
+- `address already in use` on 3000 — another Next.js copy is running; stop it and rerun.
 - `connection refused … 5432` — Postgres isn’t running, or `DATABASE_URL` in `.env.local` is wrong.
 - Login page loads but sign-in fails — `npm run db:seed` to recreate demo users.
 - **Ready to Contract** missing from the nav — you are a Sales User. Sign in as `sandhya@experience.com`.
@@ -180,4 +172,4 @@ Rebuild the module UI only after changing `modules/guided-selling/frontend`:
 
 ## Scope boundary
 
-This app owns inquiry through the Ready to Contract handoff. Package recommendation, quote versioning, pricing/discount rules, approvals, contracts, e-signature, document storage and renewals belong to the downstream module and are not duplicated here.
+This app owns inquiry through Ready to Contract, including package recommendation, contract generation, e-signature demo, documents and renewal copilot.

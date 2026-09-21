@@ -6,16 +6,8 @@ import { canAccessContract, toRole, type Role } from "@/lib/roles";
 /**
  * The server-side half of role-based access, in front of everything.
  *
- * Page and API guards live in the pages and handlers themselves, but the
- * contract module is not a Next route: `next.config.ts` rewrites
- * /quote-module, /assets, /static and the unmatched /api/* straight to the
- * module process. Those rewrites bypass app routing entirely, so a guard in a
- * page cannot cover them. The proxy runs before every rewrite stage (headers →
- * redirects → proxy → beforeFiles → filesystem → afterFiles → dynamic →
- * fallback), which makes it the only place that can.
- *
- * A Sales User therefore cannot reach the module by typing its URL, loading its
- * bundle, or calling its API directly — the request never leaves this process.
+ * Page and API guards also live in their handlers. This proxy keeps Ready to
+ * Contract closed by default before route code runs.
  *
  * Runtime is Node (the default for proxy in Next 16), so the role comes from
  * the database rather than from anything the browser could edit. The lookup is
@@ -23,11 +15,8 @@ import { canAccessContract, toRole, type Role } from "@/lib/roles";
  * bursts; a role change is live within that window.
  */
 
-/** Everything behind the contract boundary, whether ours or the module's. */
-const CONTRACT_PREFIXES = ["/quote-module", "/assets/", "/static/", "/api/handoff", "/api/quote-module"];
-
-/** This app's own API surface. Anything else under /api is proxied to the module. */
-const APP_API_PREFIXES = ["/api/activity", "/api/auth", "/api/availability", "/api/inquiries", "/api/notifications"];
+/** Everything behind the contract boundary. */
+const CONTRACT_PREFIXES = ["/api/contract", "/api/handoff"];
 
 /** Contract-boundary pages that are ours (guarded again in the page itself). */
 const isContractPage = (p: string) => p === "/guided-selling" || /^\/leads\/[^/]+\/quote$/.test(p);
@@ -35,10 +24,6 @@ const isContractPage = (p: string) => p === "/guided-selling" || /^\/leads\/[^/]
 function isProtected(pathname: string): boolean {
   if (isContractPage(pathname)) return true;
   if (CONTRACT_PREFIXES.some((p) => pathname === p || pathname.startsWith(p))) return true;
-  // Unmatched /api/* falls through to the module, so treat anything that is not
-  // one of ours as the module's — an allowlist, so a new module endpoint is
-  // closed by default rather than open until someone remembers to add it.
-  if (pathname.startsWith("/api/")) return !APP_API_PREFIXES.some((p) => pathname.startsWith(p));
   return false;
 }
 
@@ -73,7 +58,7 @@ export async function proxy(request: NextRequest) {
   const role = userId ? await roleOf(userId) : null;
   if (canAccessContract(role)) return NextResponse.next();
 
-  const isPage = isContractPage(pathname) || pathname === "/quote-module" || pathname.startsWith("/quote-module/");
+  const isPage = isContractPage(pathname);
   if (!userId && isPage) {
     const login = new URL("/login", request.url);
     login.searchParams.set("next", pathname);
@@ -89,10 +74,7 @@ export const config = {
   matcher: [
     "/guided-selling",
     "/leads/:id/quote",
-    "/quote-module",
-    "/quote-module/:path*",
-    "/assets/:path*",
-    "/static/:path*",
-    "/api/:path*",
+    "/api/contract/:path*",
+    "/api/handoff/:path*",
   ],
 };

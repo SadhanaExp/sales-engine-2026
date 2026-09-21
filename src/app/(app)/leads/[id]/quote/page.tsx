@@ -2,7 +2,7 @@ import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
 import { X } from "lucide-react";
 import { getWorkspaceData } from "@/lib/repo/workspace";
-import { getQuoteWorkspaceConfig, buildHandoffPayload } from "@/lib/handoff";
+import { buildHandoffPayload } from "@/lib/handoff";
 import { headers } from "next/headers";
 import { getCurrentUser } from "@/lib/auth";
 import { hasContractAccess } from "@/lib/authz";
@@ -26,7 +26,6 @@ export default async function QuoteHandoffPage({ params }: PageProps<"/leads/[id
     redirect(`/leads/${id}`);
   }
 
-  const configured = Boolean(getQuoteWorkspaceConfig().baseUrl);
   const alreadyQuoted = lead.status !== "qualified";
   const requoting = !alreadyQuoted && Boolean(lead.quote_requested_at);
   const primary = contacts.find((c) => c.id === lead.primary_contact_id) ?? contacts.find((c) => c.is_primary) ?? contacts[0];
@@ -77,10 +76,6 @@ export default async function QuoteHandoffPage({ params }: PageProps<"/leads/[id
                 <Field label="Insights" value={`${payload.insights.length} commercial implication${payload.insights.length === 1 ? "" : "s"}`} />
               </dl>
             </div>
-          )}
-
-          {!configured && (
-            <p className="mb-4 text-xs text-muted-foreground">{DOWNSTREAM.partner} URL is not configured — the handoff is recorded here and can be opened once it is.</p>
           )}
 
           <div className="flex gap-2">

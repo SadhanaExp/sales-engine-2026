@@ -2,7 +2,8 @@
 
 import { revalidatePath } from "next/cache";
 import { headers } from "next/headers";
-import { buildHandoffPayload, deliverHandoff } from "@/lib/handoff";
+import { buildHandoffPayload } from "@/lib/handoff";
+import { enqueueQuoteHandoff } from "@/lib/contract/store";
 import { DOWNSTREAM } from "@/lib/modules";
 import { redirect } from "next/navigation";
 import { z } from "zod";
@@ -119,7 +120,12 @@ export async function createQuoteHandoffAction(leadId: string): Promise<HandoffR
 
   const lead = await getLeadById(leadId);
   const resend = Boolean(lead?.quote_requested_at);
-  const delivery = await deliverHandoff(payload);
+  await enqueueQuoteHandoff(payload);
+  const delivery: HandoffResult = {
+    status: "delivered",
+    url: `/guided-selling?lead=${encodeURIComponent(leadId)}`,
+    detail: `Quote context persisted in ${DOWNSTREAM.partner}.`,
+  };
 
   if (lead && lead.status !== "quoted" && lead.status !== "won") {
     await markQuoted(leadId, name);
