@@ -13,9 +13,16 @@ export function getPool() {
     if (!connectionString) {
       throw new Error("DATABASE_URL is not set. Copy .env.example to .env.local.");
     }
-    // Hosted Postgres (Supabase, Neon, RDS…) requires TLS; local Postgres usually has none.
+    // Hosted Postgres (Supabase, Neon, RDS, Vercel Postgres) requires TLS;
+    // local Postgres usually has none. Serverless isolates (Vercel) should
+    // hold at most one client so we do not exhaust the pooler.
     const local = /localhost|127\.0\.0\.1/.test(connectionString);
-    pool = new Pool({ connectionString, ssl: local ? undefined : { rejectUnauthorized: false }, max: 5 });
+    const serverless = Boolean(process.env.VERCEL);
+    pool = new Pool({
+      connectionString,
+      ssl: local ? undefined : { rejectUnauthorized: false },
+      max: serverless ? 1 : 5,
+    });
   }
   return pool;
 }

@@ -13,6 +13,9 @@ export const metadata: Metadata = {
   description: "Turn customer inquiries into qualified opportunities.",
 };
 
+/** AI brief + qualification server actions can exceed the default 10s on Vercel Hobby. */
+export const maxDuration = 60;
+
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html lang="en" className="h-full antialiased" data-scroll-behavior="smooth">

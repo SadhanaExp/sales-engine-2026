@@ -35,6 +35,18 @@ npm run db:setup                      # schema + demo seed (wipes existing demo 
 npm run dev                           # http://localhost:3000
 ```
 
+## Deploy (Vercel)
+
+The Next.js workspace deploys from GitHub to Vercel. You need a **hosted**
+Postgres URL (Neon or Supabase) — local Docker Postgres is not reachable.
+
+1. `DATABASE_URL='postgres://…hosted…' npm run db:setup`
+2. Import https://github.com/SadhanaExp/sales-engine-2026 at [vercel.com/new](https://vercel.com/new)
+3. Set `DATABASE_URL`, `SESSION_SECRET`, `NEXT_PUBLIC_STAGE_NAME=Ready to Contract`, `NEXT_PUBLIC_PARTNER_MODULE_NAME=Ready to Contract`
+4. Leave `QUOTE_WORKSPACE_URL` unset on Vercel (Ready to Contract needs the Python process; that is the Render/Docker path)
+
+Full steps: **[docs/DEPLOY.md](docs/DEPLOY.md)**.
+
 If `psql` is not on your PATH (common with Docker-only Postgres), apply the schema yourself then seed:
 
 ```bash

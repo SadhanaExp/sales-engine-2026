@@ -1,78 +1,97 @@
 # Deploying the Sales Engine publicly
 
-**One application, one deployment, one URL.** The Next.js workspace and the
-quote module (FastAPI) ship in a single container built from the `Dockerfile` at
-the repo root. The module listens on the container's loopback; the workspace
-proxies it (`next.config.ts`) and is the only public listener. From outside —
-and to a judge — there is one service.
+There are two honest ways to put this on the internet. Pick based on whether
+**Ready to Contract** has to work on the live URL.
 
-Two pieces to set up:
+| Goal | Host |
+|---|---|
+| Talk to Sales, login, pipeline, AI, Scheduled Tasks | **Vercel** (this Next.js app) + hosted Postgres |
+| The whole product including Ready to Contract (FastAPI) | **Render** (Docker) — one container, two processes |
 
-| Piece | Host | Why |
+Vercel runs serverless Node. It cannot start `uvicorn` next to `next start`,
+so `QUOTE_WORKSPACE_URL=http://127.0.0.1:8001` does **not** work there. The
+contract module stays in `modules/guided-selling` and is served from a
+container (Render) or left unconfigured on Vercel.
+
+Local Postgres on your Mac is not reachable from Vercel. You need a hosted
+database (Neon, Supabase, or Vercel Postgres).
+
+---
+
+## Vercel (Next.js workspace)
+
+Repo: https://github.com/SadhanaExp/sales-engine-2026
+
+### 1. Hosted Postgres
+
+Create a project on [Neon](https://neon.tech) or [Supabase](https://supabase.com).
+Copy the URI (use the **pooler** on port 5432 / 6543).
+
+From this repo, apply schema + demo users **once** (this wipes demo tables):
+
+```bash
+DATABASE_URL='postgres://…your-hosted-db…' npm run db:setup
+```
+
+Sign-in after deploy: `sandhya@experience.com` / `demo1234` (Admin).
+
+### 2. Import the GitHub repo
+
+1. Open [vercel.com/new](https://vercel.com/new) and import `SadhanaExp/sales-engine-2026`.
+2. Framework: **Next.js** (auto-detected). Root directory: `.`
+3. Environment variables — set for **Production** (and Preview if you want):
+
+| Name | Required | Value |
 |---|---|---|
-| Postgres | Supabase | Competition stack; `DATABASE_URL` is the only change |
-| The whole Sales Engine | Render (Docker) | One service, `render.yaml` at the repo root |
+| `DATABASE_URL` | yes | hosted Postgres URI from step 1 |
+| `SESSION_SECRET` | yes | a long random string, not `dev-only-change-me` |
+| `NEXT_PUBLIC_STAGE_NAME` | yes | `Ready to Contract` |
+| `NEXT_PUBLIC_PARTNER_MODULE_NAME` | yes | `Ready to Contract` |
+| `HANDOFF_API_KEY` | no | any shared secret; unused unless a module URL is set |
+| `INBOUND_API_KEY` | no | for `POST /api/inquiries` |
+| `ANTHROPIC_API_KEY` | no | Claude; omit for Deterministic |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | no | Google sign-in |
+| `QUOTE_WORKSPACE_URL` | **leave unset** | localhost:8001 is not a Vercel service |
 
-Python cannot run inside Node, so there are still two processes inside the
-container. `scripts/start.mjs` supervises them: if either stops, the container
-stops, so the platform restarts a whole healthy instance rather than serving a
-half-working product.
+`QUOTE_WORKSPACE_URL` is read at **build** time (`next.config.ts` rewrites). Do
+not point it at `127.0.0.1`.
 
-## 1. Supabase
+4. Deploy. The live URL is `https://<project>.vercel.app`.
 
-1. New project → Settings → Database → **Connection string → URI** (Session
-   pooler or direct URI, port 5432). Replace `[YOUR-PASSWORD]`.
-2. From your Mac, apply schema + seed once:
-   ```bash
-   DATABASE_URL='postgres://…supabase…:5432/postgres' npm run db:setup
-   ```
+5. If you enable Google sign-in, add
+   `https://<project>.vercel.app/api/auth/google/callback` to the OAuth client.
 
-## 2. Render
+### 3. What works on Vercel
 
-1. Push to GitHub.
-2. New → **Blueprint** → connect the repo → it reads `render.yaml` and builds
-   the Dockerfile. One web service, no second service to wire up.
-3. Set the environment variables Render marks as required:
-   - `DATABASE_URL` — the Supabase URI from step 1.
-   - `SESSION_SECRET`, `HANDOFF_API_KEY` — Render generates both; leave them.
-   - Optional: `ANTHROPIC_API_KEY` (without it the AI runs deterministically and
-     the badge says so), `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` /
-     `GOOGLE_ALLOWED_DOMAINS` for Google sign-in, and the calendar variables in
-     `GOOGLE-CALENDAR.md`.
+Works: `/inquire`, `/login`, pipeline, lead workspace, AI Intelligence,
+Scheduled Tasks, `/schedule`.
 
-   Do **not** set `QUOTE_WORKSPACE_URL`. It is pinned in the Dockerfile to the
-   container's loopback: `next.config.ts` bakes the proxy destinations at build
-   time and `scripts/start.mjs` derives the module's listen port from the same
-   value, so the two cannot drift. Overriding it from the dashboard is how you
-   would get a Quote Ready page that 500s with nothing in the logs.
+Does not work: **Ready to Contract** embed (no FastAPI process). The nav entry
+is still there for Admins; the module panel reports it is not configured.
 
-4. If you use Google sign-in, add `https://<your-service>.onrender.com/api/auth/google/callback`
-   to the OAuth client's authorised redirect URIs, and the origin alongside it.
+### Hobby plan limits
 
-## 3. Verify the live URL
+AI regeneration can exceed 10 seconds without `ANTHROPIC_API_KEY` it is usually
+fine. With Claude, a Pro plan (or `maxDuration`) is safer. This app sets
+`maxDuration = 60` on the root layout; Hobby still caps at the plan maximum.
 
-Open the Render URL and walk the whole flow on the deployed site, not locally:
+---
 
-1. `/inquire` — submit a Talk to Sales inquiry, book a discovery slot.
-2. Sign in, confirm the inquiry is on Home and in the pipeline.
-3. Open the opportunity: AI Opportunity Intelligence, qualification.
-4. **Quote Ready** — the module must render in the right-hand panel on the same
-   customer. This is the one to check: it is the only part that depends on the
-   proxy.
-5. Submit that URL on the intake form. It is the whole product.
+## Render (full app, including Ready to Contract)
 
-## Notes
+One Docker image (`Dockerfile`): FastAPI on loopback, Next.js public.
 
-- Render's free tier sleeps after inactivity; the first request after a sleep
-  takes ~30 s while the container starts. Open the live URL a minute before a
-  demo.
-- The module's store is in memory, so it resets when the container restarts. The
-  workspace notices and re-delivers the quote context for the opportunity you
-  open, so the same customer reappears — never a second one.
-- Local development is unchanged: `npm run dev` runs the same two processes with
-  hot reload. `scripts/start.mjs` is the production entrypoint only.
-- To run the container locally exactly as Render will:
-  ```bash
-  docker build -t sales-engine .
-  docker run -p 3000:3000 -e DATABASE_URL='…' -e SESSION_SECRET=dev sales-engine
-  ```
+1. Hosted Postgres as above; `DATABASE_URL='…' npm run db:setup`.
+2. On Render: New → **Blueprint** → this repo (`render.yaml`).
+3. Set `DATABASE_URL`. Leave `SESSION_SECRET` / `HANDOFF_API_KEY` generated.
+   Do **not** set `QUOTE_WORKSPACE_URL` — the Dockerfile pins it to loopback.
+4. Walk `/inquire` → login → opportunity → **Continue to Contract** on the
+   Render URL.
+
+Free Render sleeps after inactivity (~30s cold start). The module store is
+in-memory and resets on restart; opening the opportunity re-delivers context.
+
+```bash
+docker build -t sales-engine .
+docker run -p 3000:3000 -e DATABASE_URL='…' -e SESSION_SECRET=dev sales-engine
+```
