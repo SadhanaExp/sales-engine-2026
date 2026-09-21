@@ -1,0 +1,171 @@
+# Experience Sales Engine — Lead & Deal Workspace
+
+The front half of the Experience.com Sales Engine, as a working application:
+
+**Customer Inquiry → Opportunity → Qualification → AI Opportunity Intelligence → Quote Context → Ready to Contract**
+
+One origin locally: **http://localhost:3000**. `npm run dev` starts the Next.js workspace and the contract module together; the module is proxied through this app, so you never open `:8001` in a second window.
+
+Two experiences in one app:
+
+- **Talk to Sales** at `/inquire` — a prospect submits company, contact, users, interest and requirements; a lead is created instantly and they can book a discovery call.
+- **Internal workspace** at `/` (login required) — pipeline, Scheduled Tasks, per-lead workspace (Contacts, Activity, Qualification, AI Opportunity Intelligence), and **Ready to Contract** (Admin only): Quote Context → handoff into Quote → Approval → Contract → E-signature → Renewal.
+
+Stack: Next.js 16 (App Router) · React 19 · TypeScript · Tailwind CSS v4 · shadcn/ui-style components on Radix · PostgreSQL (Supabase-compatible). Python 3.11+ for the contract module.
+
+## Run it locally
+
+**You need:** Node 20+, Python 3.11+, and PostgreSQL 14+ on port 5432 (Postgres.app, Homebrew, or a Docker container named `sales_engine_pg` all work). Or point `DATABASE_URL` at a Supabase project — nothing in the code is Supabase-specific.
+
+```bash
+npm install
+python3 -m venv modules/guided-selling/.venv
+modules/guided-selling/.venv/bin/pip install -r modules/guided-selling/requirements.txt
+
+createdb sales_engine                 # skip if the database already exists
+cp .env.example .env.local
+# Edit DATABASE_URL for your Postgres, e.g.
+#   DATABASE_URL=postgres://<your-mac-username>@localhost:5432/sales_engine
+# Keep:
+#   NEXT_PUBLIC_STAGE_NAME=Ready to Contract
+#   NEXT_PUBLIC_PARTNER_MODULE_NAME=Ready to Contract
+# Optional: ANTHROPIC_API_KEY=sk-ant-…  → AI runs on Claude (otherwise Deterministic)
+
+npm run db:setup                      # schema + demo seed (wipes existing demo rows)
+npm run dev                           # http://localhost:3000
+```
+
+If `psql` is not on your PATH (common with Docker-only Postgres), apply the schema yourself then seed:
+
+```bash
+docker exec -i sales_engine_pg psql -U <user> -d sales_engine -v ON_ERROR_STOP=1 < db/schema.sql
+npm run db:seed
+```
+
+Sign in:
+
+| Account | Password | Role |
+|---|---|---|
+| `sandhya@experience.com` | `demo1234` | Admin — full lifecycle, including Ready to Contract |
+| `sadhana@experience.com` | `demo1234` | Sales User — lifecycle up to Scheduled Tasks |
+| `marcus@experience.com` | `demo1234` | Sales User |
+
+`npm run db:seed` resets to a clean demo: six companies (Acme, FinEdge, Meridian Home Loans, Nova Insurance, BrightPath Realty, Summit Care Clinics) across New / Contacted / Quoted / Won. **It truncates leads, contacts, companies, activities and users** — do not run it if you have data you want to keep.
+
+## Suggested demo path
+
+1. Open `/inquire` and submit an inquiry as a customer (optionally book a discovery call).
+2. Sign in at `/login` as Sandhya — the new lead is at the top of the pipeline and in the bell.
+3. Open it: Contacts · Activity · Qualification · **AI Intelligence**. Best AI walkthrough: **Meridian Home Loans**.
+4. Fill Qualification; **Continue to Contract →** lights up when context is complete (or **Complete Qualification →** jumps to the missing field). Admin only.
+5. Quote Context review → Continue — the same customer appears under **Ready to Contract**: Accept handoff → Customer 360 → Contract → Signing → Renewal.
+
+**Scheduled Tasks** (`/tasks`) is the work list (calls, gaps, next actions). The week calendar is **`/schedule`** — linked from the bottom of Scheduled Tasks, not a second sidebar item.
+
+Open only **http://localhost:3000**. If port 8001 is already in use, another copy of the module is running; stop it and rerun `npm run dev`.
+
+## Naming (Ready to Contract vs Guided Selling)
+
+The **stage people see** is **Ready to Contract** (sidebar, pipeline, badges, CTAs, AI copy). Set it in `.env.local`:
+
+```
+NEXT_PUBLIC_STAGE_NAME=Ready to Contract
+NEXT_PUBLIC_PARTNER_MODULE_NAME=Ready to Contract
+```
+
+The **code and folder** stay `modules/guided-selling` and route `/guided-selling` — those are integration names, not labels. Copying `.env.example` without changing those two lines used to restore “Guided Selling” in the UI.
+
+## Roles and access
+
+Two roles in `app_users.role`:
+
+| | Sales User | Admin |
+| --- | --- | --- |
+| Inquiries, pipeline, opportunity workspace, contacts, activity, qualification, AI Deal Brief, Scheduled Tasks | yes | yes |
+| Ready to Contract, quote context review, handoff, contract module | no | yes |
+
+Enforced on the server (`canAccessContract` in `src/lib/roles.ts`, `src/lib/authz.ts`, `src/proxy.ts`) — typing the URL or curling the API gets the same answer as the hidden nav item.
+
+## AI Opportunity Intelligence
+
+A bounded workflow (`src/lib/ai/orchestrator.ts`), not a chatbot:
+
+```
+tools (read-only) → deterministic extraction → retrieval from the Sales Knowledge Base
+  → 1. Opportunity Analyst   (Claude · every claim cites a source)
+  → 2. Solution Context      (Claude · every item cites a retrieved doc)
+  → 3. Readiness / Evaluator (deterministic guardrail + Claude review)
+  → Opportunity Intelligence on the lead → salesperson reviews → Continue to Contract →
+```
+
+- Tools in `src/lib/ai/tools.ts` are read-only. The AI never changes stage, qualification, or the handoff.
+- Knowledge base: `src/lib/ai/knowledge/` — no pricing, packages or tiers.
+- Evaluator strips invented figures, unretrieved citations, and pricing language. Readiness is a ✓/⚠ checklist.
+- Card label: **Claude · \<model\>** or **Deterministic**. Set `ANTHROPIC_API_KEY` for Claude; otherwise each stage falls back and says so.
+- Evals: `npm run eval:ai` (nine cases). `npm run eval:ai -- --claude` also runs Claude.
+
+## Team, ownership and coverage
+
+Every lead has an **Owner**. New inquiries are routed (`src/lib/routing.ts`) by industry coverage, then by fewest open deals. The sidebar **Team** section filters to *My leads*, a colleague, or *Unassigned*.
+
+## Talk to Sales and discovery-call booking
+
+`/inquire` (also `/talk-to-sales`). Required: company, full name, work email, phone, industry, number of users. Validated against `src/lib/inquiry-schema.ts`.
+
+On confirmation the customer can book a discovery call. Without Google Calendar env vars the app uses labelled **“Demo availability — Google Calendar not configured”** (`src/lib/calendar/`). It never claims Google is connected when it isn’t. See `.env.example` for service-account and `SALES_*` settings.
+
+## Sign in
+
+Email + password (`app_users`, bcrypt) or **Sign in with Google** (`GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`). Until those are set, the button explains it isn’t configured. Only existing accounts or new `@experience.com` accounts (`GOOGLE_ALLOWED_DOMAINS`) get in. Customers never sign in.
+
+## Where leads come from
+
+- **Talk to Sales** — `/inquire`
+- **Internal** — **+ New Lead**
+- **Other channels** — `POST /api/inquiries` with `X-Inbound-Key: <INBOUND_API_KEY>`. Body: `companyName, contactName, workEmail, phone?, numberOfUsers, interest, industry?, requirements, additionalInfo?, source?`. Replies `201 { leadId, companyId, companyMatched, leadUrl }`.
+
+Industry is shown on each pipeline row and filterable from the sidebar.
+
+## Ready to Contract (contract module)
+
+Lives in **`modules/guided-selling`** (FastAPI + Vite/React). After the venv above, **`npm run dev` starts both**. `npm run dev:web` starts the workspace only.
+
+Rebuild the module UI only after changing `modules/guided-selling/frontend`:
+
+```bash
+(cd modules/guided-selling/frontend && npm install && npm run build)
+```
+
+**Continue to Contract** posts schema-2.0 quote context to `POST /api/handoffs` and opens Ready to Contract on the same customer. No quote amount, package or discount is sent — the module prices the deal. Handoff contract: **[docs/QUOTE_HANDOFF.md](docs/QUOTE_HANDOFF.md)**. Public deploy: **[docs/DEPLOY.md](docs/DEPLOY.md)**.
+
+## Where things live
+
+| Area | Path |
+|---|---|
+| Schema | `db/schema.sql` |
+| Seed | `db/seed.ts` |
+| Data access | `src/lib/db.ts`, `src/lib/repo/*` |
+| Stage labels | `src/lib/modules.ts` |
+| Server actions | `src/app/actions/*.ts` |
+| Talk to Sales | `src/app/inquire/`, `src/components/inquire/` |
+| Discovery-call booking | `src/lib/calendar/` |
+| Dashboard | `src/app/(app)/page.tsx`, `src/components/dashboard/` |
+| Scheduled Tasks | `src/app/(app)/tasks/page.tsx` |
+| Week calendar | `src/app/(app)/schedule/page.tsx` |
+| Lead workspace | `src/app/(app)/leads/[id]/` |
+| Quote handoff | `src/app/(app)/leads/[id]/quote/page.tsx` |
+| Ready to Contract page | `src/app/(app)/guided-selling/page.tsx` |
+| AI workflow | `src/lib/ai/`; evals in `evals/ai-intelligence/` |
+| Contract module | `modules/guided-selling/` |
+
+## If something doesn't start
+
+- `address already in use` on 8001 — another module copy is running; stop it and rerun.
+- `connection refused … 5432` — Postgres isn’t running, or `DATABASE_URL` in `.env.local` is wrong.
+- Login page loads but sign-in fails — `npm run db:seed` to recreate demo users.
+- **Ready to Contract** missing from the nav — you are a Sales User. Sign in as `sandhya@experience.com`.
+- Sidebar still says Guided Selling — set `NEXT_PUBLIC_STAGE_NAME` / `NEXT_PUBLIC_PARTNER_MODULE_NAME` to `Ready to Contract` and restart `npm run dev`.
+
+## Scope boundary
+
+This app owns inquiry through the Ready to Contract handoff. Package recommendation, quote versioning, pricing/discount rules, approvals, contracts, e-signature, document storage and renewals belong to the downstream module and are not duplicated here.
