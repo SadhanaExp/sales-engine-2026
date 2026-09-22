@@ -44,7 +44,9 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-# Contracts module toolchain
+# Nested standalone app
+apps/ready-to-contract/node_modules/
+apps/ready-to-contract/.next/
 modules/guided-selling/.venv/
 modules/guided-selling/frontend/node_modules/
 modules/guided-selling/**/__pycache__/

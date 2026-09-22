@@ -6,6 +6,9 @@ The front half of the Experience.com Sales Engine, as a working application:
 
 One origin locally: **http://localhost:3000**. Ready to Contract is native Next.js (`/guided-selling`, `/api/contract`).
 
+**Standalone Vaultline** (submit / demo as its own app) lives in [`apps/ready-to-contract`](apps/ready-to-contract) on the `ready-to-contract-app` branch: `cd apps/ready-to-contract && npm install && npm run dev` → **http://localhost:3001**.
+
+
 Two experiences in one app:
 
 - **Talk to Sales** at `/inquire` — a prospect submits company, contact, users, interest and requirements; a lead is created instantly and they can book a discovery call.
